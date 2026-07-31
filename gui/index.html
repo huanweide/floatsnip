@@ -27,6 +27,7 @@
     transition:transform .18s ease, box-shadow .18s ease;
   }
   #ball:hover{transform:translate(-50%,-50%) scale(1.08);}
+  #ball.dragging{transform:translate(-50%,-50%) scale(1) !important;box-shadow:0 4px 14px rgba(124,108,255,.35),0 0 0 4px rgba(124,108,255,.08) !important;transition:none !important;}
   #ball svg{width:30px;height:30px;fill:#fff;pointer-events:none;}
   #ball .pulse{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 0 rgba(124,108,255,.5);animation:pulse 2.4s infinite;pointer-events:none;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(124,108,255,.45);}70%{box-shadow:0 0 0 16px rgba(124,108,255,0);}100%{box-shadow:0 0 0 0 rgba(124,108,255,0);}}
@@ -85,7 +86,7 @@
   .modal{position:absolute;inset:0;background:rgba(6,8,14,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;
     opacity:0;pointer-events:none;transition:.18s ease;z-index:20;padding:18px;}
   .modal.show{opacity:1;pointer-events:auto;}
-  .modal-card{width:100%;max-width:330px;background:#161922;border:1px solid var(--line);border-radius:16px;padding:18px;
+  .modal-card{width:100%;max-width:330px;max-height:calc(100% - 40px);overflow-y:auto;background:#161922;border:1px solid var(--line);border-radius:16px;padding:18px;
     box-shadow:0 20px 60px rgba(0,0,0,.5);transform:scale(.94);transition:.18s ease;}
   .modal.show .modal-card{transform:scale(1);}
   .modal-card h3{font-size:15px;margin-bottom:12px;}
@@ -207,11 +208,15 @@ function init(){
 }
 (function waitReady(){
   if(window.pywebview && window.pywebview.api){ api = window.pywebview.api; init(); return; }
-  let tries = 0;
+  let tries = 0, maxTries = 75; // ~15 秒
   const t = setInterval(()=>{
     if(window.pywebview && window.pywebview.api){
       clearInterval(t); api = window.pywebview.api; init();
-    } else if(++tries > 25){ clearInterval(t); setTimeout(waitReady, 300); }
+    } else if(++tries > maxTries){
+      clearInterval(t);
+      const b = document.getElementById('ball');
+      if(b){ b.style.background = '#ff6b81'; b.title = '启动失败，请重新运行 FloatSnip.exe'; }
+    }
   }, 200);
 })();
 
@@ -228,6 +233,7 @@ function makeDraggable(el){
     if(ev.button !== 0) return;
     if(ev.target.closest('button')) return;
     ev.preventDefault();
+    el.classList.add('dragging');
     dragState = { sx:ev.clientX, sy:ev.clientY, wx:0, wy:0, moved:false, pid:0 };
     try{
       const p = await api.get_window_pos();
@@ -245,6 +251,7 @@ function makeDraggable(el){
       }
     };
     const onUp = ()=>{
+      el.classList.remove('dragging');
       window.removeEventListener('pointermove', onMove);
       window.removeEventListener('pointerup', onUp);
       if(dragState && dragState.moved){
@@ -397,6 +404,13 @@ function startHotkeyRecord(){
   inp.value='按下组合键…';
   inp.classList.add('rec');
 }
+document.getElementById('hotkeyInput').addEventListener('blur', ()=>{
+  if(!recordingHotkey) return;
+  recordingHotkey = false;
+  const inp = document.getElementById('hotkeyInput');
+  inp.classList.remove('rec');
+  inp.value = hotkeyCurrent;
+});
 const KEY_ALIAS = {
   ' ':'space', 'arrowup':'up', 'arrowdown':'down', 'arrowleft':'left', 'arrowright':'right',
   'escape':'esc', 'enter':'enter', 'tab':'tab', 'backspace':'backspace', 'delete':'delete',

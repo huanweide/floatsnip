@@ -296,6 +296,9 @@ class Api:
         if self._win:
             try:
                 self._win.move(int(x), int(y))
+                self.data.setdefault("settings", {})["window_x"] = int(x)
+                self.data.setdefault("settings", {})["window_y"] = int(y)
+                save_data(self.data)
                 return True
             except Exception:
                 pass
@@ -445,6 +448,14 @@ def main():
             on_top=True,
         )
     api._win = window
+    # 恢复上次拖动位置
+    wx = api.data.get("settings", {}).get("window_x")
+    wy = api.data.get("settings", {}).get("window_y")
+    if wx is not None and wy is not None:
+        try:
+            window.move(int(wx), int(wy))
+        except Exception:
+            pass
     threading.Thread(target=apply_hotkey, args=(api,), daemon=True).start()
     webview.start()
 
