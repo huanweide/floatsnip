@@ -1,0 +1,18 @@
+# Python
+__pycache__/
+*.pyc
+
+# 虚拟环境
+.venv/
+venv/
+
+# PyInstaller 构建产物
+build/
+*.spec
+
+# 打包输出（作为 GitHub Release 二进制发布，不进仓库）
+dist/
+
+# 本地测试 / 临时
+_smoke.py
+*.tmp
