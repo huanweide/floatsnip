@@ -22,13 +22,13 @@
   #ball{
     position:absolute;left:50%;top:50%;width:64px;height:64px;transform:translate(-50%,-50%) scale(1);
     border-radius:50%;background:linear-gradient(135deg,var(--acc1),var(--acc2));
-    display:flex;align-items:center;justify-content:center;cursor:pointer;
+    display:flex;align-items:center;justify-content:center;cursor:pointer;touch-action:none;
     box-shadow:0 8px 30px rgba(124,108,255,.55),0 0 0 6px rgba(124,108,255,.12);
     transition:transform .18s ease, box-shadow .18s ease;
   }
   #ball:hover{transform:translate(-50%,-50%) scale(1.08);}
-  #ball svg{width:30px;height:30px;fill:#fff;}
-  #ball .pulse{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 0 rgba(124,108,255,.5);animation:pulse 2.4s infinite;}
+  #ball svg{width:30px;height:30px;fill:#fff;pointer-events:none;}
+  #ball .pulse{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 0 rgba(124,108,255,.5);animation:pulse 2.4s infinite;pointer-events:none;}
   @keyframes pulse{0%{box-shadow:0 0 0 0 rgba(124,108,255,.45);}70%{box-shadow:0 0 0 16px rgba(124,108,255,0);}100%{box-shadow:0 0 0 0 rgba(124,108,255,0);}}
 
   /* ============ 面板 ============ */
@@ -44,9 +44,9 @@
 
   .titlebar{display:flex;align-items:center;justify-content:space-between;
     padding:12px 14px;background:linear-gradient(135deg,rgba(124,108,255,.22),rgba(160,107,255,.10));
-    border-bottom:1px solid var(--line);cursor:grab;}
+    border-bottom:1px solid var(--line);cursor:grab;touch-action:none;}
   .titlebar:active{cursor:grabbing;}
-  .logo{font-weight:700;font-size:14px;letter-spacing:.3px;display:flex;align-items:center;gap:6px;}
+  .logo{font-weight:700;font-size:14px;letter-spacing:.3px;display:flex;align-items:center;gap:6px;pointer-events:none;}
   .logo .dot{width:9px;height:9px;border-radius:50%;background:linear-gradient(135deg,var(--acc1),var(--acc2));box-shadow:0 0 10px var(--acc2);}
   .title-actions{display:flex;gap:6px;}
   .icon-btn{width:28px;height:28px;border-radius:9px;background:rgba(255,255,255,.06);color:var(--sub);
@@ -85,7 +85,7 @@
   .modal{position:absolute;inset:0;background:rgba(6,8,14,.55);backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;
     opacity:0;pointer-events:none;transition:.18s ease;z-index:20;padding:18px;}
   .modal.show{opacity:1;pointer-events:auto;}
-  .modal-card{width:100%;max-width:320px;background:#161922;border:1px solid var(--line);border-radius:16px;padding:18px;
+  .modal-card{width:100%;max-width:330px;background:#161922;border:1px solid var(--line);border-radius:16px;padding:18px;
     box-shadow:0 20px 60px rgba(0,0,0,.5);transform:scale(.94);transition:.18s ease;}
   .modal.show .modal-card{transform:scale(1);}
   .modal-card h3{font-size:15px;margin-bottom:12px;}
@@ -104,14 +104,23 @@
   .btn.danger{background:rgba(255,107,129,.16);color:var(--danger);}
   .btn.danger:hover{background:rgba(255,107,129,.26);}
 
+  /* 设置 */
   .switch-row{display:flex;align-items:center;justify-content:space-between;padding:10px 0;font-size:13.5px;border-bottom:1px solid var(--line);}
   .switch-row input{width:18px;height:18px;accent-color:var(--acc1);}
+  .hotkey-row{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:10px 0;font-size:13.5px;border-bottom:1px solid var(--line);}
+  .hotkey-row input{width:130px;text-align:center;background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--txt);
+    padding:7px 4px;font-size:13px;outline:none;cursor:pointer;}
+  .hotkey-row input:hover{border-color:var(--acc1);}
+  .hotkey-row input.rec{border-color:var(--acc1);color:var(--acc2);animation:blink 1s infinite;}
+  @keyframes blink{50%{opacity:.45;}}
   .cat-edit{margin-top:12px;display:flex;flex-direction:column;gap:8px;}
   .cat-edit .ce{display:flex;align-items:center;gap:8px;}
   .cat-edit .ce label{width:54px;font-size:12px;color:var(--sub);}
   .cat-edit .ce input{flex:1;background:var(--card);border:1px solid var(--line);border-radius:9px;color:var(--txt);padding:7px 9px;font-size:13px;outline:none;}
   .cat-edit .ce input:focus{border-color:var(--acc1);}
   .cat-edit .note{font-size:11.5px;color:var(--sub);}
+  .row-btn{width:100%;padding:10px;border-radius:11px;background:var(--card);color:var(--sub);font-size:13.5px;margin-top:10px;transition:.15s;}
+  .row-btn:hover{background:rgba(255,255,255,.10);color:var(--txt);}
 
   /* Toast */
   .toast{position:absolute;left:50%;bottom:18px;transform:translate(-50%,16px);background:rgba(20,22,30,.95);
@@ -124,15 +133,16 @@
 </style>
 </head>
 <body class="mode-ball">
-  <div id="ball" class="ball draggable" onclick="toggleMode()">
+  <div id="ball" title="点一下打开常用语面板">
     <span class="pulse"></span>
     <svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
   </div>
 
   <div id="panel">
-    <div class="titlebar draggable">
+    <div class="titlebar">
       <span class="logo"><span class="dot"></span>浮球快贴</span>
       <div class="title-actions">
+        <button class="icon-btn" onclick="hideBall()" title="隐藏（用快捷键唤回）">▁</button>
         <button class="icon-btn" onclick="toggleMode()" title="收起">▢</button>
         <button class="icon-btn" onclick="openSettings()" title="设置">⚙</button>
       </div>
@@ -145,7 +155,7 @@
   <div id="editor" class="modal">
     <div class="modal-card">
       <h3 id="editorTitle">新建常用语</h3>
-      <textarea id="editorText" maxlength="10000" placeholder="输入任意内容，支持中文输入法，无上限（软上限 10000 字）。例如：常用话术、账号、命令模板、发弹幕的文案…"></textarea>
+      <textarea id="editorText" maxlength="10000" placeholder="输入任意内容，支持中文输入法。例如：常用话术、账号、命令模板、发弹幕的文案…"></textarea>
       <div id="editorCats" class="cat-pick"></div>
       <div class="modal-actions">
         <button class="btn ghost" onclick="closeEditor()">取消</button>
@@ -157,7 +167,13 @@
   <div id="settings" class="modal">
     <div class="modal-card">
       <h3>设置</h3>
+      <div class="hotkey-row">
+        <span>唤醒快捷键</span>
+        <input id="hotkeyInput" readonly title="点击后按下想用的组合键" onclick="startHotkeyRecord()">
+      </div>
       <div class="switch-row"><span>复制后自动粘贴</span><input type="checkbox" id="autoPaste" onchange="toggleAutoPaste(this.checked)"></div>
+      <div class="switch-row"><span>开机自启</span><input type="checkbox" id="autostart" onchange="toggleAutostart(this.checked)"></div>
+      <button class="row-btn" onclick="hideBall()">隐藏悬浮球（按快捷键唤回）</button>
       <div class="cat-edit" id="catEditor"></div>
       <div class="modal-actions">
         <button class="btn ghost" onclick="closeSettings()">关闭</button>
@@ -169,32 +185,85 @@
   <div id="toast" class="toast"></div>
 
 <script>
-const api = window.pywebview.api;
+let api = null;
 let state = null;
 let currentCat = 'all';
 let editId = null;
 let editCat = null;
+let hotkeyCurrent = '';
+let recordingHotkey = false;
+let justDragged = false;
+
+/* ---------- 初始化（pywebview 的 API 是异步注入的，必须等 ready） ---------- */
+function init(){
+  if(!api) return;
+  Promise.all([api.get_state(), api.get_mode()]).then(([st, mode])=>{
+    state = st;
+    setMode(mode);
+    renderCats(); renderList();
+    makeDraggable(document.querySelector('.titlebar'));
+    makeDraggable(document.getElementById('ball'));
+  }).catch(()=>{});
+}
+(function waitReady(){
+  if(window.pywebview && window.pywebview.api){ api = window.pywebview.api; init(); return; }
+  let tries = 0;
+  const t = setInterval(()=>{
+    if(window.pywebview && window.pywebview.api){
+      clearInterval(t); api = window.pywebview.api; init();
+    } else if(++tries > 25){ clearInterval(t); setTimeout(waitReady, 300); }
+  }, 200);
+})();
 
 function setMode(m){ document.body.className = 'mode-'+m; }
 async function toggleMode(){
-  const m = await api.toggle_mode();
-  setMode(m);
-}
-function bindDrag(el){
-  if(!el) return;
-  el.addEventListener('mousedown', function(ev){
-    if(ev.target.closest('button')) return;
-    try{ pywebview.window.startDrag(); }catch(e){}
-  });
+  try{ const m = await api.toggle_mode(); setMode(m); }catch(e){}
 }
 
-async function init(){
-  state = await api.get_state();
-  setMode(await api.get_mode());
-  renderCats(); renderList(); bindDrag(document.querySelector('.titlebar')); bindDrag(document.getElementById('ball'));
+/* ---------- 拖动（窗口级：js_api -> Python window.move） ---------- */
+let dragState = null;
+function makeDraggable(el){
+  if(!el) return;
+  el.addEventListener('pointerdown', async (ev)=>{
+    if(ev.button !== 0) return;
+    if(ev.target.closest('button')) return;
+    ev.preventDefault();
+    dragState = { sx:ev.clientX, sy:ev.clientY, wx:0, wy:0, moved:false, pid:0 };
+    try{
+      const p = await api.get_window_pos();
+      if(dragState){ dragState.wx = p[0]; dragState.wy = p[1]; }
+    }catch(e){}
+    const onMove = (e)=>{
+      if(!dragState) return;
+      const dx = e.clientX - dragState.sx, dy = e.clientY - dragState.sy;
+      if(Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.moved = true;
+      if(!dragState.pid){
+        dragState.pid = requestAnimationFrame(()=>{
+          dragState.pid = 0;
+          if(dragState) api.move_to(dragState.wx + dx, dragState.wy + dy);
+        });
+      }
+    };
+    const onUp = ()=>{
+      window.removeEventListener('pointermove', onMove);
+      window.removeEventListener('pointerup', onUp);
+      if(dragState && dragState.moved){
+        justDragged = true; setTimeout(()=>{ justDragged = false; }, 150);
+      }
+      dragState = null;
+    };
+    window.addEventListener('pointermove', onMove);
+    window.addEventListener('pointerup', onUp);
+  });
 }
-function cats(){ return state.categories; }
-function customs(){ return state.categories.filter(c=>!c.fixed); }
+document.getElementById('ball').addEventListener('click', ()=>{
+  if(justDragged) return;
+  toggleMode();
+});
+
+/* ---------- 列表 ---------- */
+function cats(){ return state ? state.categories : []; }
+function customs(){ return state ? state.categories.filter(c=>!c.fixed) : []; }
 
 function renderCats(){
   const box = document.getElementById('cats'); box.innerHTML="";
@@ -208,7 +277,7 @@ function renderCats(){
 }
 function renderList(){
   const box=document.getElementById('list'); box.innerHTML="";
-  let items=state.snippets.slice().reverse();
+  let items=(state && state.snippets ? state.snippets.slice() : []).reverse();
   if(currentCat!=='all') items=items.filter(s=>s.category===currentCat);
   if(items.length===0){
     box.innerHTML='<div class="empty">这里还没有内容<br>点下方「＋ 新建常用语」添加第一条吧</div>';
@@ -227,8 +296,10 @@ function renderList(){
   });
 }
 async function doCopy(sid){
-  const ok=await api.copy(sid);
-  toast(ok?'复制成功':'复制失败', ok);
+  try{
+    const ok=await api.copy(sid);
+    toast(ok?'复制成功':'复制失败', ok);
+  }catch(e){ toast('复制失败', false); }
 }
 function toast(msg, ok){
   const t=document.getElementById('toast');
@@ -237,7 +308,7 @@ function toast(msg, ok){
   setTimeout(()=>{ t.className='toast'+(ok?'':' err'); }, 1400);
 }
 
-/* 编辑器 */
+/* ---------- 编辑器 ---------- */
 function openEditor(sid){
   editId = sid;
   const s = sid ? state.snippets.find(x=>x.id===sid) : null;
@@ -260,19 +331,30 @@ function closeEditor(){ document.getElementById('editor').classList.remove('show
 async function saveEditor(){
   const v=document.getElementById('editorText').value;
   if(!v.trim()){ toast('内容不能为空',false); return; }
-  const r=await api.save_snippet(editId, v, editCat);
-  if(r.ok){ state=r.state; closeEditor(); renderCats(); renderList(); toast('已保存',true); }
-  else toast(r.msg||'保存失败',false);
+  try{
+    const r=await api.save_snippet(editId, v, editCat);
+    if(r.ok){ state=r.state; closeEditor(); renderCats(); renderList(); toast('已保存',true); }
+    else toast(r.msg||'保存失败',false);
+  }catch(e){ toast('保存失败',false); }
 }
-
 async function delSnip(sid){
-  const r=await api.delete_snippet(sid);
-  if(r.ok){ state=r.state; renderCats(); renderList(); toast('已删除',true); }
+  try{
+    const r=await api.delete_snippet(sid);
+    if(r.ok){ state=r.state; renderCats(); renderList(); toast('已删除',true); }
+  }catch(e){}
 }
 
-/* 设置 */
-function openSettings(){
-  document.getElementById('autoPaste').checked = !!(state.settings&&state.settings.auto_paste);
+/* ---------- 设置 ---------- */
+async function openSettings(){
+  if(!state) state = {};
+  if(!state.settings) state.settings = {};
+  document.getElementById('autoPaste').checked = !!state.settings.auto_paste;
+  hotkeyCurrent = state.settings.hotkey || 'ctrl+`';
+  document.getElementById('hotkeyInput').value = hotkeyCurrent;
+  try{
+    const r = await api.get_autostart();
+    document.getElementById('autostart').checked = !!(r && r.autostart);
+  }catch(e){ document.getElementById('autostart').checked = false; }
   renderCatEditor();
   document.getElementById('settings').classList.add('show');
 }
@@ -282,7 +364,7 @@ function renderCatEditor(){
     const row=document.createElement('div'); row.className='ce';
     const lab=document.createElement('label'); lab.textContent='分类';
     const inp=document.createElement('input'); inp.value=c.name; inp.maxLength=8;
-    inp.onchange=async()=>{ const r=await api.rename_category(c.id, inp.value); if(r.ok){state=r.state;renderCats();} else toast(r.msg||'失败',false); };
+    inp.onchange=async()=>{ try{ const r=await api.rename_category(c.id, inp.value); if(r.ok){state=r.state;renderCats();} else toast(r.msg||'失败',false); }catch(e){} };
     row.appendChild(lab); row.appendChild(inp); box.appendChild(row);
   });
   const note=document.createElement('div'); note.className='note';
@@ -290,12 +372,70 @@ function renderCatEditor(){
   box.appendChild(note);
 }
 function closeSettings(){ document.getElementById('settings').classList.remove('show'); }
-async function toggleAutoPaste(v){ const r=await api.set_auto_paste(v); state.settings=r; toast(r.auto_paste?'已开启自动粘贴':'已关闭自动粘贴',true); }
+async function toggleAutoPaste(v){
+  try{
+    const r=await api.set_auto_paste(v);
+    if(r && r.ok){ state = await api.get_state(); toast(r.auto_paste?'已开启自动粘贴':'已关闭自动粘贴', true); }
+  }catch(e){}
+}
+async function toggleAutostart(v){
+  try{
+    const r=await api.set_autostart(v);
+    if(r && r.ok){ state = await api.get_state(); toast(r.autostart?'已开启开机自启':'已关闭开机自启', true); }
+    else toast((r&&r.msg)||'设置开机自启失败', false);
+  }catch(e){ toast('设置开机自启失败', false); }
+}
+async function hideBall(){
+  try{ const r=await api.hide_ball(); if(r && r.ok){ setMode('ball'); toast('已隐藏，按快捷键唤回', true); } }catch(e){}
+}
 function quitApp(){ try{ api.quit_app(); }catch(e){} }
 
-document.addEventListener('keydown',e=>{ if(e.key==='Escape'){ closeEditor(); closeSettings(); } });
+/* ---------- 快捷键录制 ---------- */
+function startHotkeyRecord(){
+  recordingHotkey = true;
+  const inp=document.getElementById('hotkeyInput');
+  inp.value='按下组合键…';
+  inp.classList.add('rec');
+}
+const KEY_ALIAS = {
+  ' ':'space', 'arrowup':'up', 'arrowdown':'down', 'arrowleft':'left', 'arrowright':'right',
+  'escape':'esc', 'enter':'enter', 'tab':'tab', 'backspace':'backspace', 'delete':'delete',
+  'insert':'insert', 'home':'home', 'end':'end', 'pageup':'pageup', 'pagedown':'pagedown',
+  'control':'', 'alt':'', 'shift':'', 'meta':''
+};
+document.getElementById('hotkeyInput').addEventListener('keydown', async (e)=>{
+  e.preventDefault();
+  if(!recordingHotkey) return;
+  const inp=document.getElementById('hotkeyInput');
+  if(e.key.toLowerCase()==='escape'){
+    recordingHotkey=false; inp.classList.remove('rec'); inp.value=hotkeyCurrent; return;
+  }
+  const mods=[];
+  if(e.ctrlKey) mods.push('ctrl');
+  if(e.altKey) mods.push('alt');
+  if(e.shiftKey) mods.push('shift');
+  if(e.metaKey) mods.push('win');
+  let k=e.key.toLowerCase();
+  k = (k in KEY_ALIAS) ? KEY_ALIAS[k] : k;
+  if(k==='process'||k==='unidentified'||k.length>1){ return; } // 输入法/系统键，忽略
+  if(mods.length===0){ toast('请加至少一个功能键（Ctrl/Alt/Shift）', false); return; }
+  recordingHotkey=false;
+  const spec=[...mods, k].join('+');
+  try{
+    const r=await api.set_hotkey(spec);
+    if(r && r.ok){ hotkeyCurrent=r.hotkey; inp.value=hotkeyCurrent; state=await api.get_state(); toast('快捷键已更新', true); }
+    else { inp.value=hotkeyCurrent; toast((r&&r.msg)||'快捷键设置失败', false); }
+  }catch(err){ inp.value=hotkeyCurrent; toast('快捷键设置失败', false); }
+  inp.classList.remove('rec');
+});
 
-init();
+/* ---------- 全局 Esc ---------- */
+document.addEventListener('keydown', e=>{
+  if(e.key==='Escape'){
+    if(recordingHotkey){ recordingHotkey=false; document.getElementById('hotkeyInput').classList.remove('rec'); document.getElementById('hotkeyInput').value=hotkeyCurrent; return; }
+    closeEditor(); closeSettings();
+  }
+});
 </script>
 </body>
 </html>

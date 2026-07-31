@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """FloatSnip 浮球快贴 · 后端
-Python 后端：全局热键、剪贴板（ctypes 零依赖）、JSON 存储、窗口控制。
+Python 后端：全局热键（可配置、可热重载）、剪贴板（ctypes 零依赖）、
+JSON 存储、窗口控制（拖动 / 隐藏 / 显示）、开机自启。
 前端经 pywebview 承载于 Edge WebView2，做精致 UI 与平滑动画。
 """
 import os
+import re
 import sys
 import json
 import ctypes
 import threading
-import webbrowser
 
 import webview
 from pynput import keyboard
@@ -22,9 +23,10 @@ os.makedirs(DATA_DIR, exist_ok=True)
 DATA_FILE = os.path.join(DATA_DIR, "data.json")
 GMEM_MOVEABLE = 0x0002
 CF_UNICODETEXT = 13
+DEFAULT_HOTKEY = "ctrl+`"
 
 DEFAULT_DATA = {
-    "settings": {"auto_paste": False, "hotkey": "<ctrl>+`"},
+    "settings": {"auto_paste": False, "hotkey": DEFAULT_HOTKEY},
     "categories": [
         {"id": "all", "name": "所有", "fixed": True},
         {"id": "c1", "name": "AI"},
@@ -44,7 +46,7 @@ DEFAULT_DATA = {
 # ---------------------------------------------------------------------------
 def load_data():
     if not os.path.exists(DATA_FILE):
-        save_data(dict(DEFAULT_DATA))
+        save_data(json.loads(json.dumps(DEFAULT_DATA)))
         return json.loads(json.dumps(DEFAULT_DATA))
     try:
         with open(DATA_FILE, "r", encoding="utf-8") as f:
@@ -84,13 +86,116 @@ def copy_text(text):
 
 
 # ---------------------------------------------------------------------------
+# 快捷键规范化（用户友好格式 <-> pynput 格式）
+# 用户格式示例：ctrl+`  /  ctrl+alt+b  /  alt+space
+# pynput 格式示例：<ctrl>+`  /  <ctrl><alt>b
+# ---------------------------------------------------------------------------
+def normalize_hotkey(hk):
+    """把用户友好的 ctrl+` 转成 pynput 格式 <ctrl>+`；无法识别返回 None。"""
+    if not hk:
+        return None
+    hk = (hk or "").strip().lower()
+    parts = [p.strip() for p in hk.split("+") if p.strip()]
+    if not parts:
+        return None
+    mods, key = [], None
+    for p in parts:
+        if p in ("ctrl", "control", "^", "<ctrl>"):
+            mods.append("<ctrl>")
+        elif p in ("alt", "option", "!", "<alt>"):
+            mods.append("<alt>")
+        elif p in ("shift", "<shift>"):
+            mods.append("<shift>")
+        elif p in ("win", "cmd", "super", "meta", "<cmd>"):
+            mods.append("<cmd>")
+        else:
+            if key is not None:
+                return None  # 多个主键，非法
+            key = p
+    if key is None:
+        return None
+    keymap = {
+        "esc": "<esc>", "escape": "<esc>", "enter": "<enter>", "return": "<enter>",
+        "tab": "<tab>", "space": "<space>", "backspace": "<backspace>",
+        "delete": "<delete>", "del": "<delete>", "insert": "<insert>",
+        "home": "<home>", "end": "<end>", "pageup": "<page_up>", "pagedown": "<page_down>",
+        "pgup": "<page_up>", "pgdn": "<page_down>", "up": "<up>", "down": "<down>",
+        "left": "<left>", "right": "<right>", "capslock": "<caps_lock>",
+        "printscreen": "<print_screen>", "pause": "<pause>", "menu": "<menu>",
+    }
+    key = keymap.get(key, key)
+    # 功能键 f1-f24 需写成 pynput 的 <f5> 形式
+    if re.fullmatch(r"f([1-9]|1[0-9]|2[0-4])", key):
+        key = "<" + key + ">"
+    # pynput 语法：每个修饰键与主键之间都用 + 分隔，如 <ctrl>+<alt>+b
+    spec = "+".join(mods + [key]) if mods else key
+    # 交给 pynput 做最终合法性校验（解析失败即视为非法）
+    try:
+        keyboard.HotKey.parse(spec)
+    except Exception:
+        return None
+    return spec
+
+
+# ---------------------------------------------------------------------------
+# 全局热键（支持热重载）
+# ---------------------------------------------------------------------------
+_hk_listener = None
+_hk_lock = threading.Lock()
+
+
+def _toggle_hotkey(api):
+    """热键回调：隐藏中则唤回，否则切换 球/面板。"""
+    try:
+        if api.hidden:
+            api.show_ball()
+            return
+        m = api.toggle_mode()
+        if api._win:
+            api._win.evaluate_js("setMode('%s')" % m)
+    except Exception:
+        pass
+
+
+def register_hotkey(api, spec):
+    try:
+        hk = keyboard.GlobalHotKeys({spec: lambda: _toggle_hotkey(api)})
+        hk.start()
+        return hk
+    except Exception:
+        return None
+
+
+def apply_hotkey(api):
+    """按当前设置注册/重载全局热键（先停旧，再启新）。"""
+    global _hk_listener
+    with _hk_lock:
+        old = _hk_listener
+        _hk_listener = None
+        if old is not None:
+            try:
+                old.stop()
+            except Exception:
+                pass
+        spec = normalize_hotkey(api.data.get("settings", {}).get("hotkey", DEFAULT_HOTKEY))
+        if not spec:
+            spec = normalize_hotkey(DEFAULT_HOTKEY)
+        _hk_listener = register_hotkey(api, spec)
+    return spec
+
+
+# ---------------------------------------------------------------------------
 # API（暴露给前端 JS）
 # ---------------------------------------------------------------------------
 class Api:
     def __init__(self):
         self.data = load_data()
+        s = self.data.setdefault("settings", {})
+        s.setdefault("auto_paste", False)
+        s.setdefault("hotkey", DEFAULT_HOTKEY)
+        self.auto_paste = bool(s["auto_paste"])
         self.mode = "ball"  # ball | panel
-        self.auto_paste = self.data.get("settings", {}).get("auto_paste", False)
+        self.hidden = False
         self._win = None
 
     # ---- 状态 ----
@@ -114,7 +219,6 @@ class Api:
         try:
             if self._win:
                 self._win.hide()
-            # 给目标窗口一点时间重新获得焦点
             threading.Timer(0.12, self._send_ctrl_v).start()
         except Exception:
             pass
@@ -135,7 +239,6 @@ class Api:
         if not content:
             return {"ok": False, "msg": "内容不能为空"}
         cat = category if category and category != "all" else "c1"
-        # 校验分类存在
         if not any(c["id"] == cat for c in self.data["categories"]):
             cat = "c1"
         if sid:
@@ -145,7 +248,6 @@ class Api:
                 s["category"] = cat
                 save_data(self.data)
                 return {"ok": True, "state": self.data}
-        # sid 未提供或没找到 -> 新建
         num = (max([int(x["id"][1:]) for x in self.data["snippets"] if x["id"][1:].isdigit()], default=0) + 1)
         new_id = "s" + str(num)
         self.data["snippets"].append({"id": new_id, "content": content, "category": cat})
@@ -165,7 +267,7 @@ class Api:
             return {"ok": False, "msg": "自定义分类最多 5 个"}
         if not name:
             return {"ok": False, "msg": "名字不能为空"}
-        cid = "c" + str(int(time_counter()))
+        cid = "c" + str(time_counter())
         self.data["categories"].append({"id": cid, "name": name})
         save_data(self.data)
         return {"ok": True, "state": self.data}
@@ -181,13 +283,99 @@ class Api:
                 return {"ok": True, "state": self.data}
         return {"ok": False, "msg": "该分类不可改名或不存在"}
 
-    # ---- 设置 ----
+    # ---- 窗口：拖动 / 位置 ----
+    def get_window_pos(self):
+        if self._win:
+            try:
+                return [int(self._win.x), int(self._win.y)]
+            except Exception:
+                pass
+        return [0, 0]
+
+    def move_to(self, x, y):
+        if self._win:
+            try:
+                self._win.move(int(x), int(y))
+                return True
+            except Exception:
+                pass
+        return False
+
+    # ---- 窗口：隐藏 / 显示 ----
+    def hide_ball(self):
+        self.hidden = True
+        if self._win:
+            try:
+                self._win.hide()
+            except Exception:
+                pass
+        return {"ok": True, "hidden": True}
+
+    def show_ball(self):
+        self.hidden = False
+        self.mode = "ball"
+        if self._win:
+            try:
+                self._win.show()
+            except Exception:
+                pass
+        return {"ok": True, "hidden": False}
+
+    # ---- 设置：自动粘贴 ----
     def set_auto_paste(self, val):
         self.auto_paste = bool(val)
         self.data.setdefault("settings", {})["auto_paste"] = self.auto_paste
         save_data(self.data)
         return {"ok": True, "auto_paste": self.auto_paste}
 
+    # ---- 设置：快捷键 ----
+    def get_hotkey(self):
+        return self.data.get("settings", {}).get("hotkey", DEFAULT_HOTKEY)
+
+    def set_hotkey(self, hk):
+        spec = normalize_hotkey(hk)
+        if not spec:
+            return {"ok": False, "msg": "快捷键格式不对，示例：ctrl+` 或 ctrl+alt+b"}
+        self.data.setdefault("settings", {})["hotkey"] = (hk or "").strip().lower()
+        save_data(self.data)
+        apply_hotkey(self)
+        return {"ok": True, "hotkey": self.data["settings"]["hotkey"]}
+
+    # ---- 设置：开机自启（当前用户注册表 Run 键） ----
+    def get_autostart(self):
+        try:
+            import winreg
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER,
+                r"Software\Microsoft\Windows\CurrentVersion\Run",
+                0,
+                winreg.KEY_READ,
+            ) as k:
+                winreg.QueryValueEx(k, "FloatSnip")
+                return {"ok": True, "autostart": True}
+        except Exception:
+            return {"ok": True, "autostart": False}
+
+    def set_autostart(self, val):
+        try:
+            import winreg
+            key_path = r"Software\Microsoft\Windows\CurrentVersion\Run"
+            exe = sys.executable
+            with winreg.OpenKey(
+                winreg.HKEY_CURRENT_USER, key_path, 0, winreg.KEY_SET_VALUE
+            ) as k:
+                if val:
+                    winreg.SetValueEx(k, "FloatSnip", 0, winreg.REG_SZ, '"%s"' % exe)
+                else:
+                    try:
+                        winreg.DeleteValue(k, "FloatSnip")
+                    except FileNotFoundError:
+                        pass
+            return {"ok": True, "autostart": bool(val)}
+        except Exception as e:
+            return {"ok": False, "msg": "设置开机自启失败：%s" % e}
+
+    # ---- 模式切换 / 退出 ----
     def toggle_mode(self):
         if self.mode == "ball":
             self.mode = "panel"
@@ -209,6 +397,12 @@ class Api:
         return self.mode
 
     def quit_app(self):
+        with _hk_lock:
+            if _hk_listener is not None:
+                try:
+                    _hk_listener.stop()
+                except Exception:
+                    pass
         try:
             if self._win:
                 self._win.destroy()
@@ -220,25 +414,6 @@ class Api:
 def time_counter():
     import time
     return int(time.time() * 1000)
-
-
-# ---------------------------------------------------------------------------
-# 全局热键
-# ---------------------------------------------------------------------------
-def start_hotkey(api):
-    def toggle():
-        try:
-            m = api.toggle_mode()
-            if api._win:
-                api._win.evaluate_js("setMode('%s')" % m)
-        except Exception:
-            pass
-
-    try:
-        hk = keyboard.GlobalHotKeys({"<ctrl>+`": toggle})
-        hk.start()
-    except Exception:
-        pass
 
 
 # ---------------------------------------------------------------------------
@@ -270,7 +445,7 @@ def main():
             on_top=True,
         )
     api._win = window
-    threading.Thread(target=start_hotkey, args=(api,), daemon=True).start()
+    threading.Thread(target=apply_hotkey, args=(api,), daemon=True).start()
     webview.start()
 
 

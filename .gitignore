@@ -15,4 +15,5 @@ dist/
 
 # 本地测试 / 临时
 _smoke.py
+_check.js
 *.tmp
