@@ -422,40 +422,66 @@ def time_counter():
 # ---------------------------------------------------------------------------
 # 入口
 # ---------------------------------------------------------------------------
+def pos_watchdog(api, window):
+    """后台线程：每 3 秒把窗口当前位置落盘（用于拖动后记忆）。"""
+    import time
+    last = (None, None)
+    while True:
+        time.sleep(3)
+        try:
+            x, y = int(window.x), int(window.y)
+            if (x, y) != last and (x, y) != (0, 0):
+                last = (x, y)
+                s = api.data.setdefault("settings", {})
+                s["window_x"], s["window_y"] = x, y
+                save_data(api.data)
+        except Exception:
+            pass
+
+
 def main():
     api = Api()
     html_path = os.path.join(BASE, "gui", "index.html")
-    try:
-        window = webview.create_window(
-            "FloatSnip 浮球快贴",
-            url=html_path,
-            js_api=api,
-            width=64,
-            height=64,
-            frameless=True,
-            on_top=True,
-            transparent=True,
-            easy_drag=False,
-        )
-    except Exception:
-        window = webview.create_window(
-            "FloatSnip 浮球快贴",
-            url=html_path,
-            js_api=api,
-            width=64,
-            height=64,
-            frameless=True,
-            on_top=True,
-        )
+    window = webview.create_window(
+        "FloatSnip 浮球快贴",
+        url=html_path,
+        js_api=api,
+        width=64,
+        height=64,
+        frameless=True,
+        on_top=True,
+        transparent=True,   # 必须：圆形浮球依赖窗口透明
+        easy_drag=True,     # OS 原生拖动，零延迟、平滑（替代 JS 自拖）
+    )
     api._win = window
-    # 恢复上次拖动位置
-    wx = api.data.get("settings", {}).get("window_x")
-    wy = api.data.get("settings", {}).get("window_y")
-    if wx is not None and wy is not None:
+
+    def on_loaded():
+        # Windows WebView2：透明需「先 hide 再 show」激活，否则是白块
         try:
-            window.move(int(wx), int(wy))
+            window.hide()
+            window.show()
         except Exception:
             pass
+        # 恢复上次拖动位置
+        wx = api.data.get("settings", {}).get("window_x")
+        wy = api.data.get("settings", {}).get("window_y")
+        if wx is not None and wy is not None:
+            try:
+                window.move(int(wx), int(wy))
+            except Exception:
+                pass
+
+    try:
+        window.events.loaded += on_loaded
+    except Exception:
+        # 极老版本无 events.loaded，则延迟用线程激活
+        def _delay():
+            import time
+            time.sleep(1.2)
+            on_loaded()
+        threading.Thread(target=_delay, daemon=True).start()
+
+    threading.Thread(target=pos_watchdog, args=(api, window), daemon=True).start()
     threading.Thread(target=apply_hotkey, args=(api,), daemon=True).start()
     webview.start()
 

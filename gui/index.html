@@ -26,7 +26,7 @@
     box-shadow:0 8px 30px rgba(124,108,255,.55),0 0 0 6px rgba(124,108,255,.12);
     transition:transform .18s ease, box-shadow .18s ease;
   }
-  #ball:hover{transform:translate(-50%,-50%) scale(1.08);}
+  #ball:hover{box-shadow:0 10px 36px rgba(124,108,255,.7),0 0 0 7px rgba(124,108,255,.16);transition:box-shadow .18s ease;}
   #ball.dragging{transform:translate(-50%,-50%) scale(1) !important;box-shadow:0 4px 14px rgba(124,108,255,.35),0 0 0 4px rgba(124,108,255,.08) !important;transition:none !important;}
   #ball svg{width:30px;height:30px;fill:#fff;pointer-events:none;}
   #ball .pulse{position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 0 rgba(124,108,255,.5);animation:pulse 2.4s infinite;pointer-events:none;}
@@ -134,13 +134,13 @@
 </style>
 </head>
 <body class="mode-ball">
-  <div id="ball" title="点一下打开常用语面板">
+  <div id="ball" title="点一下打开常用语面板 · 拖动小球可移动位置" class="easy-drag">
     <span class="pulse"></span>
     <svg viewBox="0 0 24 24"><path d="M16 1H4a2 2 0 0 0-2 2v14h2V3h12V1zm3 4H8a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2zm0 16H8V7h11v14z"/></svg>
   </div>
 
   <div id="panel">
-    <div class="titlebar">
+    <div class="titlebar easy-drag">
       <span class="logo"><span class="dot"></span>浮球快贴</span>
       <div class="title-actions">
         <button class="icon-btn" onclick="hideBall()" title="隐藏（用快捷键唤回）">▁</button>
@@ -193,7 +193,6 @@ let editId = null;
 let editCat = null;
 let hotkeyCurrent = '';
 let recordingHotkey = false;
-let justDragged = false;
 
 /* ---------- 初始化（pywebview 的 API 是异步注入的，必须等 ready） ---------- */
 function init(){
@@ -202,8 +201,6 @@ function init(){
     state = st;
     setMode(mode);
     renderCats(); renderList();
-    makeDraggable(document.querySelector('.titlebar'));
-    makeDraggable(document.getElementById('ball'));
   }).catch(()=>{});
 }
 (function waitReady(){
@@ -225,46 +222,10 @@ async function toggleMode(){
   try{ const m = await api.toggle_mode(); setMode(m); }catch(e){}
 }
 
-/* ---------- 拖动（窗口级：js_api -> Python window.move） ---------- */
-let dragState = null;
-function makeDraggable(el){
-  if(!el) return;
-  el.addEventListener('pointerdown', async (ev)=>{
-    if(ev.button !== 0) return;
-    if(ev.target.closest('button')) return;
-    ev.preventDefault();
-    el.classList.add('dragging');
-    dragState = { sx:ev.clientX, sy:ev.clientY, wx:0, wy:0, moved:false, pid:0 };
-    try{
-      const p = await api.get_window_pos();
-      if(dragState){ dragState.wx = p[0]; dragState.wy = p[1]; }
-    }catch(e){}
-    const onMove = (e)=>{
-      if(!dragState) return;
-      const dx = e.clientX - dragState.sx, dy = e.clientY - dragState.sy;
-      if(Math.abs(dx) > 3 || Math.abs(dy) > 3) dragState.moved = true;
-      if(!dragState.pid){
-        dragState.pid = requestAnimationFrame(()=>{
-          dragState.pid = 0;
-          if(dragState) api.move_to(dragState.wx + dx, dragState.wy + dy);
-        });
-      }
-    };
-    const onUp = ()=>{
-      el.classList.remove('dragging');
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-      if(dragState && dragState.moved){
-        justDragged = true; setTimeout(()=>{ justDragged = false; }, 150);
-      }
-      dragState = null;
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-  });
-}
+/* ---------- 拖动：OS 原生（pywebview easy_drag） ---------- */
+/* #ball 与 .titlebar 已加 class="easy-drag"，由 pywebview 在 OS 层直接拖动窗口，
+   零延迟、平滑；纯点击（无移动）仍触发下方 click 切换。*/
 document.getElementById('ball').addEventListener('click', ()=>{
-  if(justDragged) return;
   toggleMode();
 });
 
