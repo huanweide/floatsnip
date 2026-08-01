@@ -9,6 +9,7 @@ venv/
 # PyInstaller 构建产物
 build/
 *.spec
+!FloatSnip.spec
 
 # 打包输出（作为 GitHub Release 二进制发布，不进仓库）
 dist/
@@ -17,3 +18,17 @@ dist/
 _smoke.py
 _check.js
 *.tmp
+observe_r10.py
+verify_round9.py
+test_ui.py
+test_ui_scenario.py
+.loop-state.json
+
+# 废弃的 WebView2 版 UI（已改用 PySide6 原生控件）
+gui/
+
+# 下载缓存
+release_dl*/
+
+_sim.js
+_sim.py
