@@ -588,10 +588,18 @@ class Api:
         return {"ok": True, "state": self.data}
 
     def export_backup(self, path):
-        """导出整份数据为 JSON 备份（与 data.json 同结构，可直接导入还原）。"""
+        """导出整份数据为 JSON 备份（与 data.json 同结构，可直接导入还原）。
+
+        导出前过滤敏感片段（sensitive=True），避免备份文件泄漏明文凭据。
+        """
         try:
+            export_data = {
+                **self.data,
+                "snippets": [s for s in self.data.get("snippets", [])
+                             if not s.get("sensitive")],
+            }
             with open(path, "w", encoding="utf-8") as f:
-                json.dump(self.data, f, ensure_ascii=False, indent=2)
+                json.dump(export_data, f, ensure_ascii=False, indent=2)
             return True, ""
         except Exception as e:
             return False, str(e)
@@ -606,6 +614,9 @@ class Api:
             for k, v in DEFAULT_DATA.items():
                 if k not in d:
                     d[k] = v
+            # 导入后统一重排 id，避免与现有/历史命名空间撞号
+            for i, s in enumerate(d.get("snippets", [])):
+                s["id"] = "s" + str(i + 1)
             self.data = d
             save_data(self.data)
             return True, ""
@@ -706,8 +717,13 @@ class Api:
         self.data["settings"]["hotkey"] = spec
         save_data(self.data)
         available = hotkey_is_available(spec)
-        register_hotkey(self)
-        return {"ok": True, "hotkey": spec, "available": available}
+        # 以 register_hotkey 的最终返回结果作为注册成功与否的唯一事实来源
+        registered = register_hotkey(self)
+        if registered:
+            return {"ok": True, "hotkey": spec, "available": available,
+                    "registered": True, "msg": "快捷键注册成功"}
+        return {"ok": True, "hotkey": spec, "available": available,
+                "registered": False, "msg": "快捷键已保存，但注册失败（可能被占用）"}
 
     def get_window_pos(self):
         if self._win:
@@ -768,7 +784,8 @@ _current_listener = None
 
 def register_hotkey(api):
     """用 Win32 RegisterHotKey 注册全局热键（替代 pynput 全局钩子）。
-    失败/被占用时不阻断主流程：提示用户改用手动（浮球/托盘）打开。"""
+    失败/被占用时不阻断主流程：提示用户改用手动（浮球/托盘）打开。
+    返回 True 表示当前已有可用监听器在运行，False 表示未能注册。"""
     global _current_listener
     if _current_listener:
         try:
@@ -778,15 +795,15 @@ def register_hotkey(api):
         _current_listener = None
     spec = normalize_hotkey(api.data["settings"].get("hotkey", DEFAULT_HOTKEY))
     if not spec:
-        return
+        return False
     mods, vk = _spec_to_mod_vk(spec)
     if vk is None:
-        return
+        return False
     # 冲突预检：被占用则不注册，提示用户用托盘/浮球打开
     if not hotkey_is_available(spec):
         api.ui(lambda: show_toast(api._win if api._win else api._panel,
                                    "快捷键被占用，无法快速唤起 · 用托盘/浮球打开", "err"))
-        return
+        return False
     _current_listener = HotkeyListener(api, [(mods, vk, lambda: _hotkey_handler(api))])
     _current_listener.running = True
     try:
@@ -795,6 +812,8 @@ def register_hotkey(api):
         _current_listener = None
         api.ui(lambda: show_toast(api._win if api._win else api._panel,
                                    "快捷键注册失败 · 用托盘/浮球打开", "err"))
+        return False
+    return True
 
 
 def _hotkey_handler(api):

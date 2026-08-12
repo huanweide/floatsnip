@@ -201,6 +201,24 @@ check("set_hotkey round-trip from display string",
       r["ok"] and r["hotkey"] == M.normalize_hotkey("ctrl+`"),
       "hotkey=%r" % (r.get("hotkey") if r else None))
 
+# 导出备份必须过滤敏感片段，避免备份文件泄漏明文凭据
+export_dir = tempfile.mkdtemp(prefix="floatsnipexport_")
+M.DATA_FILE = os.path.join(export_dir, "data.json")
+api_exp = M.Api()
+api_exp.save_snippet(None, "普通常用语", "c1", sensitive=False)
+api_exp.save_snippet(None, "敏感口令123", "c1", sensitive=True)
+export_path = os.path.join(export_dir, "backup.json")
+ok, err = api_exp.export_backup(export_path)
+check("export_backup returns ok", ok, "err=%r" % err)
+with open(export_path, "r", encoding="utf-8") as _f:
+    exp = M.json.load(_f)
+exp_sens = [s for s in exp.get("snippets", []) if s.get("sensitive")]
+check("export backup excludes sensitive snippets",
+      len(exp_sens) == 0, "leaked=%d" % len(exp_sens))
+check("export backup keeps non-sensitive snippets",
+      any(s["content"] == "普通常用语" for s in exp.get("snippets", [])),
+      "count=%d" % len(exp.get("snippets", [])))
+
 # 退出路径在无 GUI 句柄下必须安全（不抛异常、不卡死主线程）
 try:
     api.quit_app()
@@ -232,10 +250,21 @@ check("migration keeps hotkey", M2.data["settings"]["hotkey"] == "ctrl+`")
 # ---------------------------------------------------------------------------
 # 汇总
 # ---------------------------------------------------------------------------
-print("=" * 64)
-print("FloatSnip v2 逻辑层验证")
-print("=" * 64)
-print("\n".join(EVID))
-print("-" * 64)
-print("RESULT: %d passed, %d failed" % (PASS, FAIL))
-sys.exit(1 if FAIL else 0)
+def _report():
+    print("=" * 64)
+    print("FloatSnip v2 逻辑层验证")
+    print("=" * 64)
+    print("\n".join(EVID))
+    print("-" * 64)
+    print("RESULT: %d passed, %d failed" % (PASS, FAIL))
+
+
+def test_logic_all():
+    """pytest 门禁：所有逻辑层校验必须全部通过（含导出敏感过滤断言）。"""
+    _report()
+    assert FAIL == 0, "逻辑层校验存在失败项:\n" + "\n".join(EVID)
+
+
+if __name__ == "__main__":
+    _report()
+    sys.exit(1 if FAIL else 0)
