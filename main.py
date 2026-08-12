@@ -15,6 +15,7 @@ import sys
 import json
 import ctypes
 import threading
+import tempfile
 
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog, font as tkfont
@@ -192,8 +193,17 @@ def save_data(data):
             if any(s.get("sensitive") for s in data["snippets"]):
                 clean = dict(data)
                 clean["snippets"] = [s for s in data["snippets"] if not s.get("sensitive")]
-        with open(DATA_FILE, "w", encoding="utf-8") as f:
-            json.dump(clean, f, ensure_ascii=False, indent=2)
+        # 原子写：先写临时文件，成功后再 os.replace 覆盖，避免写一半崩溃损坏 data.json
+        dir_name = os.path.dirname(DATA_FILE) or "."
+        fd, tmp_path = tempfile.mkstemp(dir=dir_name, suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(clean, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, DATA_FILE)
+        except Exception:
+            if os.path.exists(tmp_path):
+                os.remove(tmp_path)
+            raise
         return True
     except Exception:
         return False
