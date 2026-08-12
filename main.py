@@ -32,7 +32,7 @@ DEFAULT_HOTKEY = "ctrl+`"
 
 DEFAULT_DATA = {
     "settings": {"auto_paste": False, "hotkey": DEFAULT_HOTKEY, "window_x": None, "window_y": None,
-                  "active_cat": "all", "autostart": True},
+                  "active_cat": "all", "autostart": False},
     "categories": [
         {"id": "all", "name": "所有", "fixed": True},
         {"id": "c1", "name": "AI"},
@@ -2769,7 +2769,7 @@ def main():
     api = Api()
     api.set_root(root)           # 供 Api.ensure_panel 懒加载面板使用
     ball = FloatBall(root, api)
-    # 默认开机自启（可在设置关闭）：按用户存储偏好幂等应用注册表
+    # 默认不开机自启（可在设置开启）：按用户存储偏好幂等应用注册表
     try:
         if api.data["settings"].get("autostart", True):
             _enable_autostart()
