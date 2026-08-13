@@ -83,6 +83,10 @@ kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
 kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
 kernel32.GetModuleHandleW.argtypes = [ctypes.c_void_p]
 kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+kernel32.UnregisterClassW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p]
+kernel32.UnregisterClassW.restype = ctypes.c_int
+kernel32.GetLastError.argtypes = []
+kernel32.GetLastError.restype = ctypes.c_ulong
 user32.SetClipboardData.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
 user32.SetClipboardData.restype = ctypes.c_void_p
 user32.GetClipboardData.argtypes = [ctypes.c_ulong]
@@ -229,11 +233,27 @@ def copy_text(text):
             h_global = ctypes.windll.kernel32.GlobalAlloc(GMEM_MOVEABLE, size)
             if not h_global:
                 return False
-            ptr = ctypes.windll.kernel32.GlobalLock(h_global)
-            ctypes.memmove(ptr, buf, size)
-            ctypes.windll.kernel32.GlobalUnlock(h_global)
-            user32.SetClipboardData(CF_UNICODETEXT, h_global)
-            return True
+            try:
+                ptr = ctypes.windll.kernel32.GlobalLock(h_global)
+                if not ptr:
+                    # Lock 失败：句柄已分配但未写入，必须释放，否则泄漏
+                    ctypes.windll.kernel32.GlobalFree(h_global)
+                    return False
+                ctypes.memmove(ptr, buf, size)
+                ctypes.windll.kernel32.GlobalUnlock(h_global)
+                # SetClipboardData 成功时系统接管 h_global 所有权，绝不能释放；
+                # 失败则返回 NULL 且所有权仍归我们，必须 GlobalFree，否则句柄泄漏。
+                if not user32.SetClipboardData(CF_UNICODETEXT, h_global):
+                    ctypes.windll.kernel32.GlobalFree(h_global)
+                    return False
+                return True
+            except Exception:
+                # Lock/memmove 异常兜底：释放已分配句柄，避免泄漏
+                try:
+                    ctypes.windll.kernel32.GlobalFree(h_global)
+                except Exception:
+                    pass
+                return False
         finally:
             user32.CloseClipboard()
     except Exception:
@@ -479,11 +499,18 @@ class HotkeyListener:
         wc.lpfnWndProc = self._wndproc
         wc.hInstance = hinst
         wc.lpszClassName = "FloatSnipHotkey"
-        user32.RegisterClassExW(ctypes.byref(wc))
+        if not user32.RegisterClassExW(ctypes.byref(wc)):
+            # 同名类已存在（重复注册）属正常情况，窗口仍可创建；其它原因才告警
+            err = kernel32.GetLastError()
+            if err != 1410:  # ERROR_CLASS_ALREADY_EXISTS
+                print("[FloatSnip] 警告：热键窗口类注册失败 (err=%d)" % err)
         self.hwnd = user32.CreateWindowExW(0, "FloatSnipHotkey", "hk", 0,
                                            0, 0, 0, 0, 0, 0, hinst, 0)
         for i, (mods, vk, _cb) in enumerate(self.bindings):
-            user32.RegisterHotKey(self.hwnd, 0xED01 + i, mods, vk)
+            # RegisterHotKey 返回非零才成功；被其它程序占用时静默失败，这里显式告警
+            if not user32.RegisterHotKey(self.hwnd, 0xED01 + i, mods, vk):
+                print("[FloatSnip] 警告：热键 vk=0x%X mods=0x%X 注册失败"
+                      "（可能被其它程序或安全软件占用）" % (vk, mods))
         msg = ctypes.wintypes.MSG()
         while self.running and user32.GetMessageW(ctypes.byref(msg), 0, 0, 0) > 0:
             user32.TranslateMessage(ctypes.byref(msg))
@@ -511,6 +538,11 @@ class HotkeyListener:
         try:
             if self.hwnd:
                 user32.PostMessageW(self.hwnd, WM_DESTROY, 0, 0)
+        except Exception:
+            pass
+        # 注销窗口类，避免重复注册/类泄漏（热键重启或程序退出时）
+        try:
+            kernel32.UnregisterClassW("FloatSnipHotkey", kernel32.GetModuleHandleW(0))
         except Exception:
             pass
 
@@ -1792,8 +1824,23 @@ class FloatPanel(tk.Toplevel):
         elif res == "fail":
             self._toast("复制失败", "err")
         if res == "ok" and self.api.data["settings"].get("auto_paste"):
-            self.root.after(120, _send_ctrl_v)
+            self._auto_paste()
         return res
+
+    def _auto_paste(self):
+        """复制后自动粘贴：先把焦点还给面板弹出前的窗口（否则 Ctrl+V 打到面板自身），
+        再稍等系统切焦后发送 Ctrl+V。"""
+        prev = getattr(self, "_prev_hwnd", None)
+        try:
+            self.withdraw()  # 收起面板，释放 topmost/焦点占用
+        except Exception:
+            pass
+        if prev:
+            try:
+                user32.SetForegroundWindow(prev)
+            except Exception:
+                pass
+        self.root.after(120, _send_ctrl_v)
 
     def _toast(self, msg, kind="ok"):
         show_toast(self, msg, kind)
@@ -1945,6 +1992,12 @@ class FloatPanel(tk.Toplevel):
         if self.api.mode == "ball":
             self.withdraw()
         else:
+            # 记录面板弹出前的真实前景窗口（用户原本所在的程序），
+            # 供「复制后自动粘贴」把焦点还回去，否则 Ctrl+V 会打到面板自身。
+            try:
+                self._prev_hwnd = user32.GetForegroundWindow()
+            except Exception:
+                self._prev_hwnd = None
             self._place_near_ball()
             self.deiconify()
             self.lift()
@@ -2574,6 +2627,8 @@ user32.DispatchMessageW.argtypes = [ctypes.c_void_p]
 user32.DispatchMessageW.restype = ctypes.c_long
 user32.SetForegroundWindow.argtypes = [ctypes.c_void_p]
 user32.SetForegroundWindow.restype = ctypes.c_int
+user32.GetForegroundWindow.argtypes = []
+user32.GetForegroundWindow.restype = ctypes.c_void_p
 user32.TrackPopupMenu.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p]
 user32.TrackPopupMenu.restype = ctypes.c_int
 user32.CreatePopupMenu.restype = ctypes.c_void_p
