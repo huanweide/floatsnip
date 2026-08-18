@@ -83,8 +83,8 @@ kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
 kernel32.GlobalFree.argtypes = [ctypes.c_void_p]
 kernel32.GetModuleHandleW.argtypes = [ctypes.c_void_p]
 kernel32.GetModuleHandleW.restype = ctypes.c_void_p
-kernel32.UnregisterClassW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p]
-kernel32.UnregisterClassW.restype = ctypes.c_int
+user32.UnregisterClassW.argtypes = [ctypes.c_wchar_p, ctypes.c_void_p]
+user32.UnregisterClassW.restype = ctypes.c_int
 kernel32.GetLastError.argtypes = []
 kernel32.GetLastError.restype = ctypes.c_ulong
 user32.SetClipboardData.argtypes = [ctypes.c_ulong, ctypes.c_void_p]
@@ -542,7 +542,7 @@ class HotkeyListener:
             pass
         # 注销窗口类，避免重复注册/类泄漏（热键重启或程序退出时）
         try:
-            kernel32.UnregisterClassW("FloatSnipHotkey", kernel32.GetModuleHandleW(0))
+            user32.UnregisterClassW("FloatSnipHotkey", kernel32.GetModuleHandleW(0))
         except Exception:
             pass
 
