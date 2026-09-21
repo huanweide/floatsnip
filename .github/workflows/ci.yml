@@ -13,5 +13,5 @@ jobs:
           python-version: '3.11'
       - name: Install pytest
         run: pip install pytest
-      - name: Run logic tests (Windows-only: main.py uses ctypes.windll)
+      - name: "Run logic tests (Windows-only: main.py uses ctypes.windll)"
         run: pytest -q
