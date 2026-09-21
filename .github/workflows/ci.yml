@@ -1,5 +1,8 @@
 name: CI
-on: [push, pull_request]
+on:
+  push:
+  pull_request:
+  workflow_dispatch:      # 支持手动重跑，便于修复后立即验证
 jobs:
   test:
     runs-on: windows-latest
