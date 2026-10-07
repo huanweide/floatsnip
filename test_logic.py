@@ -1,270 +1,406 @@
 # -*- coding: utf-8 -*-
-"""FloatSnip v2 逻辑层验证（真实导入 main.py，不 mock tkinter）。
+"""FloatSnip 逻辑层 pytest 测试（真实导入 main.py，不 mock tkinter）。
 
-目的：在「沙箱无显示器」约束下，把能客观验证的逻辑全部跑通，给出可证伪证据。
-覆盖：热键规范化 / 显示名 / 冲突预检 / Win32 vk 解析 / 剪贴板编解码 / Api 业务流 / 数据迁移。
+为什么重写（旧版 test_logic.py 的问题）：
+  - 旧版把 ~60 条断言写成模块顶层的 check(...) 调用，**import 阶段就执行**，
+    顺带真的往系统剪贴板写内容、真的建 Api 落盘；
+  - pytest 只能收集到 1 个 test，CI 永远显示 "1 passed"，任何一条失败都要从一大段
+    打印里人肉定位，也无法用 `-k` 单独重跑某一条。
+
+新版：每条断言都是独立的 test / parametrize 用例；唯一有外部副作用的操作
+（读写系统剪贴板）集中在 test_clipboard_* 里，环境不允许时 skip 而不是失败。
+覆盖：热键规范化 / 显示名 / Win32 vk 解析 / 剪贴板编解码 / Api 业务流 / 数据迁移。
 """
+import json
 import os
 import sys
-import tempfile
-import traceback
+
+import pytest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
 import main as M
 
-PASS = 0
-FAIL = 0
-EVID = []
 
-
-def check(name, cond, detail=""):
-    global PASS, FAIL
-    if cond:
-        PASS += 1
-        EVID.append("  [PASS] %s%s" % (name, ("  -> " + detail) if detail else ""))
-    else:
-        FAIL += 1
-        EVID.append("  [FAIL] %s%s" % (name, ("  -> " + detail) if detail else ""))
+# ---------------------------------------------------------------------------
+# fixtures
+# ---------------------------------------------------------------------------
+@pytest.fixture
+def api(tmp_path, monkeypatch):
+    """每个用例一份独立 data.json，绝不碰用户真实的 AppData 数据。"""
+    monkeypatch.setattr(M, "DATA_FILE", str(tmp_path / "data.json"))
+    return M.Api()
 
 
 # ---------------------------------------------------------------------------
-# 1. 热键规范化（核心：用户可设置任意组合键）
+# 1. 热键规范化
 # ---------------------------------------------------------------------------
-cases = [
+@pytest.mark.parametrize("expr,expect_valid", [
+    # 合法：必须带修饰键
     ("ctrl+`", True),
     ("ctrl+shift+alt+k", True),
     ("win+k", True),
     ("alt+space", True),
-    ("f12", True),
-    ("ctrl+shift", False),     # 两个修饰无主键
-    ("ctrl+ctrl", False),      # 重复修饰无主键
-    ("zzz", False),            # 非法主键
+    ("ctrl+k", True),
+    ("ctrl+f12", True),
+    ("ctrl+shift+/", True),
+    ("CTRL+K", True),                 # 大小写
+    ("  ctrl + k  ", True),           # 空格
+    ("ctrl+escape", True),            # 别名
+    ("ctrl+return", True),            # 别名
+    # 非法：没有修饰键（裸键）
+    ("f12", False),
+    ("k", False),
+    ("space", False),
+    ("esc", False),
+    ("a", False),
+    # 非法：其它
+    ("ctrl+shift", False),            # 只有修饰键没有主键
+    ("ctrl+ctrl", False),             # 重复修饰没有主键
+    ("zzz", False),                   # 非法主键
     ("", False),
-    ("ctrl+é", False),         # 非法字符
-]
-for expr, expect_valid in cases:
-    spec = M.normalize_hotkey(expr)
-    ok = (spec is not None) == expect_valid
-    check("normalize_hotkey(%r)" % expr, ok,
-          "spec=%r (expect_valid=%s)" % (spec, expect_valid))
+    ("ctrl+é", False),                # 非法字符
+    ("ctrl+k+j", False),              # 两个主键
+    ("ctrl++", False),                # '+' 不是可用主键
+    (None, False),
+    (123, False),
+])
+def test_normalize_hotkey(expr, expect_valid):
+    assert (M.normalize_hotkey(expr) is not None) is expect_valid
 
-# 默认热键必须能被 Win32 vk 解析（否则真机 RegisterHotKey 无法注册）
-default_spec = M.normalize_hotkey(M.DEFAULT_HOTKEY)
-_mods, _vk = M._spec_to_mod_vk(default_spec)
-check("default hotkey parseable by Win32 vk", _vk is not None, "spec=%r vk=%r" % (default_spec, _vk))
+
+def test_bare_key_hotkey_is_rejected():
+    """事故回归：裸键热键会让用户每敲一次该键就弹出面板，必须拒绝。
+
+    旧版本允许把 k / 空格 / F12 这类单键设成全局热键；RegisterHotKey 注册成功后，
+    用户在任何窗口里敲这个键都会唤起面板，等于这台电脑没法正常打字。
+    """
+    for expr in ("k", "a", "z", "1", "0", "space", "enter", "esc", "tab", "f12"):
+        assert M.normalize_hotkey(expr) is None, "裸键 %r 不应被接受" % expr
+
+
+def test_ui_recorder_rejects_bare_key():
+    """设置框的按键录制路径无法在无显示器环境实例化，改断言源码里确实有拦截。
+
+    没有这个拦截时：用户在设置里单击快捷键框后只按一个 k（不按修饰键），
+    旧代码就会把 k 当成热键写入，保存后每次打字都弹面板。
+    """
+    with open(os.path.join(HERE, "main.py"), "r", encoding="utf-8") as f:
+        src = f.read()
+    # 文件里有多个 _on_key（不同控件），取设置框那个（操作 hotkey_var 的）
+    body = ""
+    pos = 0
+    while True:
+        i = src.find("def _on_key(", pos)
+        if i < 0:
+            break
+        chunk = src[i:i + 2000]
+        if "hotkey_var" in chunk:
+            body = chunk
+            break
+        pos = i + 1
+    assert body, "没找到设置框的按键录制函数 _on_key"
+    hint = "请按住 Ctrl/Alt/Shift/Win 再按主键"
+    assert hint in body, "按键录制函数里必须有裸键提示"
+    assert "if not mods:" in body, "按键录制函数里必须有裸键分支"
+    assert body.index("if not mods:") < body.index(hint), "裸键拦截必须写在写入 hotkey_var 之前"
+
+
+def test_hotkey_has_modifier():
+    assert M.hotkey_has_modifier("ctrl+k") is True
+    assert M.hotkey_has_modifier("win+k") is True
+    assert M.hotkey_has_modifier("k") is False
+    assert M.hotkey_has_modifier("") is False
+    assert M.hotkey_has_modifier(None) is False
+
+
+def test_set_hotkey_rejects_bare_key_with_clear_message(api):
+    r = api.set_hotkey("k")
+    assert r["ok"] is False
+    assert "必须包含" in r["msg"], "提示要点明缺修饰键，而不是笼统说格式不合法"
+
+
+def test_set_hotkey_invalid_gives_format_message(api):
+    r = api.set_hotkey("ctrl+é")
+    assert r["ok"] is False
+    assert "不合法" in r["msg"]
+
+
+def test_set_hotkey_roundtrip_from_display_string(api):
+    """设置框保存时传的是 format 后的显示串，必须能被 normalize 还原。"""
+    r = api.set_hotkey(M.format_hotkey_display("ctrl+`"))
+    assert r["ok"] is True
+    assert r["hotkey"] == M.normalize_hotkey("ctrl+`")
+
+
+def test_default_hotkey_is_registerable():
+    spec = M.normalize_hotkey(M.DEFAULT_HOTKEY)
+    mods, vk = M._spec_to_mod_vk(spec)
+    assert spec is not None
+    assert mods != 0, "默认热键必须带修饰键"
+    assert isinstance(vk, int) and vk > 0
+
 
 # ---------------------------------------------------------------------------
 # 2. 显示名
 # ---------------------------------------------------------------------------
-check("format display ctrl+`", M.format_hotkey_display("ctrl+`") == "Ctrl+`",
-      M.format_hotkey_display("ctrl+`"))
-check("format display win+k", M.format_hotkey_display("win+k") == "Win+K",
-      M.format_hotkey_display("win+k"))
-check("format display ctrl+shift+alt+k",
-      M.format_hotkey_display("ctrl+shift+alt+k") == "Ctrl+Shift+Alt+K",
-      M.format_hotkey_display("ctrl+shift+alt+k"))
+@pytest.mark.parametrize("expr,expect", [
+    ("ctrl+`", "Ctrl+`"),
+    ("win+k", "Win+K"),
+    ("ctrl+shift+alt+k", "Ctrl+Shift+Alt+K"),
+    ("ctrl+escape", "Ctrl+Esc"),
+    ("ctrl+f12", "Ctrl+F12"),
+])
+def test_format_hotkey_display(expr, expect):
+    assert M.format_hotkey_display(expr) == expect
+
+
+def test_format_hotkey_display_falls_back_for_invalid():
+    assert M.format_hotkey_display("k") == "k"
+    assert M.format_hotkey_display(None) == ""
+
 
 # ---------------------------------------------------------------------------
-# 3. Win32 vk 解析（冲突预检底层）
+# 3. Win32 vk 解析 / 冲突预检
 # ---------------------------------------------------------------------------
-mods, vk = M._spec_to_mod_vk("<ctrl>+`")
-check("_spec_to_mod_vk ctrl", mods == 2 and isinstance(vk, int) and vk > 0,
-      "mods=%r vk=%r" % (mods, vk))
-mods, vk = M._spec_to_mod_vk("<cmd>+k")
-check("_spec_to_mod_vk cmd", mods == 8 and vk > 0, "mods=%r vk=%r" % (mods, vk))
-mods, vk = M._spec_to_mod_vk("<alt>+<shift>+x")
-check("_spec_to_mod_vk alt+shift", mods == (1 | 4) and vk > 0, "mods=%r vk=%r" % (mods, vk))
-mods, vk = M._spec_to_mod_vk(None)
-check("_spec_to_mod_vk None", (mods, vk) == (0, None))
+def test_spec_to_mod_vk_ctrl():
+    mods, vk = M._spec_to_mod_vk("<ctrl>+`")
+    assert mods == 2 and isinstance(vk, int) and vk > 0
 
-# 冲突预检必须返回布尔（沙箱里可能 False，但必须是 bool 不抛异常）
-try:
+
+def test_spec_to_mod_vk_cmd():
+    mods, vk = M._spec_to_mod_vk("<cmd>+k")
+    assert mods == 8 and vk > 0
+
+
+def test_spec_to_mod_vk_alt_shift():
+    mods, vk = M._spec_to_mod_vk("<alt>+<shift>+x")
+    assert mods == (1 | 4) and vk > 0
+
+
+def test_spec_to_mod_vk_none():
+    assert M._spec_to_mod_vk(None) == (0, None)
+
+
+def test_hotkey_is_available_returns_bool():
     avail = M.hotkey_is_available("<ctrl>+`")
-    check("hotkey_is_available returns bool", isinstance(avail, bool), "avail=%r" % avail)
-except Exception as e:
-    check("hotkey_is_available returns bool", False, str(e))
+    assert isinstance(avail, bool)
+
 
 # ---------------------------------------------------------------------------
 # 4. 剪贴板编解码（UTF-16 + GlobalAlloc 64 位安全）
 # ---------------------------------------------------------------------------
-sample = "复制自检 ✓ 中文 + emoji 🚀 + 换行\n第二行"
-try:
-    ok = M.copy_text(sample)
-    got = M.read_clipboard()
-    check("clipboard roundtrip", ok and got == sample,
-          "ok=%s got==orig=%s" % (ok, got == sample))
-    # 空串 / None
-    check("copy_text empty str", M.copy_text("") is True)
-except Exception as e:
-    check("clipboard roundtrip", False, "EXC: " + str(e))
+def test_copy_empty_string_is_true():
+    assert M.copy_text("") is True
 
-r1 = M.copy_and_verify("验证复制自检是否真的成功")
-check("copy_and_verify ok/mismatch/empty", r1 in ("ok", "mismatch", "fail", "empty"),
-      "result=%r" % r1)
-check("copy_and_verify empty", M.copy_and_verify("   ") == "empty")
+
+def test_copy_text_none_is_true():
+    assert M.copy_text(None) is True
+
+
+def test_clipboard_roundtrip():
+    """真实的写→读回自检。环境不支持剪贴板时 skip（不是失败）。"""
+    sample = "复制自检 ✓ 中文 + emoji 🚀 + 换行\n第二行"
+    if not M.copy_text(sample):
+        pytest.skip("当前环境无法访问系统剪贴板")
+    assert M.read_clipboard() == sample
+
+
+def test_copy_and_verify_empty():
+    assert M.copy_and_verify("   ") == "empty"
+
+
+def test_copy_and_verify_result_is_known_enum():
+    assert M.copy_and_verify("验证复制自检是否真的成功") in ("ok", "mismatch", "fail", "empty")
+
 
 # ---------------------------------------------------------------------------
-# 5. Api 业务流（与 UI 解耦，可直接单测）
+# 5. Api 业务流
 # ---------------------------------------------------------------------------
-tmp = tempfile.mkdtemp(prefix="floatsniptest_")
-tmpdata = os.path.join(tmp, "data.json")
-M.DATA_FILE = tmpdata  # 重定向，避免污染真实 AppData
+def test_api_init_defaults(api):
+    assert api.data["settings"]["hotkey"] == M.DEFAULT_HOTKEY
+    assert api.data["settings"]["active_cat"] == "all"
 
-api = M.Api()
-check("Api init load defaults", api.data["settings"]["hotkey"] == M.DEFAULT_HOTKEY)
-check("Api set_mode", api.set_mode("panel") == "panel" and api.mode == "panel")
-check("Api toggle_mode", api.toggle_mode() == "ball")
-# 片段增删改
-r = api.save_snippet(None, "新常用语内容", "c1")
-check("save_snippet new", r["ok"] and any(s["content"] == "新常用语内容" for s in api.data["snippets"]))
-new_id = [s["id"] for s in api.data["snippets"] if s["content"] == "新常用语内容"][0]
-r = api.save_snippet(new_id, "改过的", "c2")
-check("save_snippet edit", any(s["id"] == new_id and s["content"] == "改过的" and s["category"] == "c2"
-                               for s in api.data["snippets"]))
-r = api.save_snippet(None, "   ", "c1")
-check("save_snippet empty rejected", (not r["ok"]) and "空" in r["msg"])
-before = len(api.data["snippets"])
-api.delete_snippet(new_id)
-check("delete_snippet", len(api.data["snippets"]) == before - 1)
 
-# 分类改名 / 新建（上限 10）
-r = api.add_category("我的分类")
-check("add_category", r["ok"] and any(c["name"] == "我的分类" for c in api.data["categories"]))
-r = api.rename_category("all", "改名固定")
-check("rename fixed rejected", (not r["ok"]) and "固定" in r["msg"])
-new_cat = [c["id"] for c in api.data["categories"] if c["name"] == "我的分类"][0]
-r = api.rename_category(new_cat, "重命名后")
-check("rename_category", any(c["id"] == new_cat and c["name"] == "重命名后"
-                             for c in api.data["categories"]))
+def test_set_mode_and_toggle(api):
+    assert api.set_mode("panel") == "panel"
+    assert api.mode == "panel"
+    assert api.toggle_mode() == "ball"
 
-# 分类重名拦截：防止造出同名分类→下拉框无法区分→保存静默错分
-r = api.add_category("重命名后")   # 已存在
-check("add_category duplicate rejected", (not r["ok"]) and "已存在" in r["msg"])
-r = api.add_category("全新分类A")
-check("add_category unique ok", r["ok"] and any(c["name"] == "全新分类A"
-                                                for c in api.data["categories"]))
-new_catA = [c["id"] for c in api.data["categories"] if c["name"] == "全新分类A"][0]
-r = api.rename_category(new_catA, "重命名后")  # 改成已存在名
-check("rename_category duplicate rejected", (not r["ok"]) and "已存在" in r["msg"])
-r = api.rename_category(new_catA, "全新分类A")  # 改名成自己原名，应允许
-check("rename_category to self name ok", r["ok"])
 
-# 删除分类（连带其下常用语一并删除；固定分类不可删；不存在报错）
-api.add_category("待删分类")
-del_cat = [c["id"] for c in api.data["categories"] if c["name"] == "待删分类"][0]
-api.save_snippet(None, "属于待删", del_cat)
-api.save_snippet(None, "属于待删2", del_cat)
-before_cats = len(api.data["categories"])
-before_snips = len(api.data["snippets"])
-r = api.delete_category(del_cat)
-check("delete_category removes category",
-      r["ok"] and len(api.data["categories"]) == before_cats - 1
-      and not any(c["id"] == del_cat for c in api.data["categories"]))
-check("delete_category cascades snippets",
-      r["ok"] and r["removed"] == 2 and len(api.data["snippets"]) == before_snips - 2
-      and not any(s["category"] == del_cat for s in api.data["snippets"]))
-r = api.delete_category("all")
-check("delete_category fixed rejected", (not r["ok"]) and "固定" in r["msg"])
-r = api.delete_category("nope")
-check("delete_category missing rejected", (not r["ok"]) and "不存在" in r["msg"])
+def test_save_snippet_new_then_edit(api):
+    r = api.save_snippet(None, "新常用语内容", "c1")
+    assert r["ok"] is True
+    sid = [s["id"] for s in api.data["snippets"] if s["content"] == "新常用语内容"][0]
+    r = api.save_snippet(sid, "改过的", "c2")
+    assert r["ok"] is True
+    hit = [s for s in api.data["snippets"] if s["id"] == sid][0]
+    assert hit["content"] == "改过的" and hit["category"] == "c2"
 
-# 持久化：重新加载应当保留（用一个未被删除的片段验证）
-api.save_snippet(None, "持久化校验片段", "c2")
-api2 = M.Api()
-check("data persisted across reload",
-      any(c["name"] == "重命名后" for c in api2.data["categories"]) and
-      any(s["content"] == "持久化校验片段" for s in api2.data["snippets"]))
 
-# active_cat 记忆：切换分类必须落盘，重启后停留上次分类（用户要求的'保存记忆'）
-api.set_active_cat("c3")
-api3 = M.Api()
-check("active_cat persisted across reload",
-      api3.data["settings"].get("active_cat") == "c3",
-      "active_cat=%r" % api3.data["settings"].get("active_cat"))
-# 默认初始为 'all'，且非法分类 id 在 UI 初始化时会被守卫回退（此处验证字段存在）
-check("active_cat default is present", "active_cat" in api.data["settings"])
+def test_save_snippet_empty_rejected(api):
+    r = api.save_snippet(None, "   ", "c1")
+    assert r["ok"] is False and "空" in r["msg"]
 
-# auto_paste / hotkey 设置
-api.set_auto_paste(True)
-check("set_auto_paste", api.data["settings"]["auto_paste"] is True)
-r = api.set_hotkey("alt+space")
-check("set_hotkey valid", r["ok"] and r["hotkey"] == M.normalize_hotkey("alt+space"))
-r = api.set_hotkey("not a key")
-check("set_hotkey invalid rejected", (not r["ok"]) and "不合法" in r["msg"])
 
-# 快捷键「显示名→保存」round-trip：设置框保存时传入的是 format 后的显示串，
-# 必须能被 normalize 还原，否则默认快捷键下点「保存」会被整体拒绝（改了不生效）
-r = api.set_hotkey(M.format_hotkey_display("ctrl+`"))
-check("set_hotkey round-trip from display string",
-      r["ok"] and r["hotkey"] == M.normalize_hotkey("ctrl+`"),
-      "hotkey=%r" % (r.get("hotkey") if r else None))
+def test_save_snippet_length_cap(api):
+    """README 承诺的软上限 10000 字：超限必须明确拒绝，不能静默截断。"""
+    r = api.save_snippet(None, "x" * (M.MAX_SNIPPET_LEN + 1), "c1")
+    assert r["ok"] is False and "过长" in r["msg"]
+    assert not any(len(s["content"]) > M.MAX_SNIPPET_LEN for s in api.data["snippets"])
 
-# 导出备份必须过滤敏感片段，避免备份文件泄漏明文凭据
-export_dir = tempfile.mkdtemp(prefix="floatsnipexport_")
-M.DATA_FILE = os.path.join(export_dir, "data.json")
-api_exp = M.Api()
-api_exp.save_snippet(None, "普通常用语", "c1", sensitive=False)
-api_exp.save_snippet(None, "敏感口令123", "c1", sensitive=True)
-export_path = os.path.join(export_dir, "backup.json")
-ok, err = api_exp.export_backup(export_path)
-check("export_backup returns ok", ok, "err=%r" % err)
-with open(export_path, "r", encoding="utf-8") as _f:
-    exp = M.json.load(_f)
-exp_sens = [s for s in exp.get("snippets", []) if s.get("sensitive")]
-check("export backup excludes sensitive snippets",
-      len(exp_sens) == 0, "leaked=%d" % len(exp_sens))
-check("export backup keeps non-sensitive snippets",
-      any(s["content"] == "普通常用语" for s in exp.get("snippets", [])),
-      "count=%d" % len(exp.get("snippets", [])))
 
-# 退出路径在无 GUI 句柄下必须安全（不抛异常、不卡死主线程）
-try:
-    api.quit_app()
-    check("quit_app safe without handles", True)
-except Exception as e:
-    check("quit_app safe without handles", False, str(e))
+def test_save_snippet_at_limit_ok(api):
+    r = api.save_snippet(None, "x" * M.MAX_SNIPPET_LEN, "c1")
+    assert r["ok"] is True
+
+
+def test_delete_snippet(api):
+    r = api.save_snippet(None, "待删除", "c1")
+    assert r["ok"] and "state" in r
+    sid = [s["id"] for s in api.data["snippets"] if s["content"] == "待删除"][0]
+    before = len(api.data["snippets"])
+    api.delete_snippet(sid)
+    assert len(api.data["snippets"]) == before - 1
+
+
+def test_add_category_and_rename(api):
+    r = api.add_category("我的分类")
+    assert r["ok"] and any(c["name"] == "我的分类" for c in api.data["categories"])
+    cid = [c["id"] for c in api.data["categories"] if c["name"] == "我的分类"][0]
+    assert api.rename_category(cid, "重命名后")["ok"] is True
+
+
+def test_rename_fixed_category_rejected(api):
+    r = api.rename_category("all", "改名固定")
+    assert r["ok"] is False and "固定" in r["msg"]
+
+
+def test_add_category_duplicate_rejected(api):
+    api.add_category("重名分类")
+    r = api.add_category("重名分类")
+    assert r["ok"] is False and "已存在" in r["msg"]
+
+
+def test_rename_category_duplicate_rejected(api):
+    api.add_category("甲")
+    api.add_category("乙")
+    a = [c["id"] for c in api.data["categories"] if c["name"] == "甲"][0]
+    r = api.rename_category(a, "乙")
+    assert r["ok"] is False and "已存在" in r["msg"]
+
+
+def test_rename_category_to_self_name_ok(api):
+    api.add_category("原名")
+    cid = [c["id"] for c in api.data["categories"] if c["name"] == "原名"][0]
+    assert api.rename_category(cid, "原名")["ok"] is True
+
+
+def test_delete_category_cascades_its_snippets(api):
+    api.add_category("待删分类")
+    cid = [c["id"] for c in api.data["categories"] if c["name"] == "待删分类"][0]
+    api.save_snippet(None, "属于待删", cid)
+    api.save_snippet(None, "属于待删2", cid)
+    before_cats = len(api.data["categories"])
+    before_snips = len(api.data["snippets"])
+    r = api.delete_category(cid)
+    assert r["ok"] is True and r["removed"] == 2
+    assert len(api.data["categories"]) == before_cats - 1
+    assert len(api.data["snippets"]) == before_snips - 2
+    assert not any(s["category"] == cid for s in api.data["snippets"])
+
+
+def test_delete_category_fixed_rejected(api):
+    r = api.delete_category("all")
+    assert r["ok"] is False and "固定" in r["msg"]
+
+
+def test_delete_category_missing_rejected(api):
+    r = api.delete_category("nope")
+    assert r["ok"] is False and "不存在" in r["msg"]
+
+
+def test_data_persists_across_reload(api):
+    api.add_category("持久化分类")
+    api.save_snippet(None, "持久化校验片段", "c2")
+    again = M.Api()
+    assert any(c["name"] == "持久化分类" for c in again.data["categories"])
+    assert any(s["content"] == "持久化校验片段" for s in again.data["snippets"])
+
+
+def test_active_cat_persists_across_reload(api):
+    api.set_active_cat("c3")
+    again = M.Api()
+    assert again.data["settings"].get("active_cat") == "c3"
+
+
+def test_set_auto_paste(api):
+    api.set_auto_paste(True)
+    assert api.data["settings"]["auto_paste"] is True
+
+
+def test_export_backup_excludes_sensitive(api, tmp_path):
+    api.save_snippet(None, "普通常用语", "c1", sensitive=False)
+    api.save_snippet(None, "敏感口令123", "c1", sensitive=True)
+    out = tmp_path / "backup.json"
+    ok, err = api.export_backup(str(out))
+    assert ok, err
+    with open(str(out), "r", encoding="utf-8") as f:
+        exp = json.load(f)
+    assert [s for s in exp.get("snippets", []) if s.get("sensitive")] == []
+    assert any(s["content"] == "普通常用语" for s in exp.get("snippets", []))
+
+
+def test_quit_app_safe_without_handles(api):
+    api.quit_app()   # 无 GUI 句柄时不能抛异常、不能卡死
+
 
 # ---------------------------------------------------------------------------
-
+# 6. 数据迁移
 # ---------------------------------------------------------------------------
-# 6. 数据迁移（老数据缺字段时补全，不破坏）
-# ---------------------------------------------------------------------------
-legacy = {
-    "settings": {"auto_paste": False, "hotkey": "ctrl+`"},
-    "categories": [{"id": "all", "name": "所有", "fixed": True}, {"id": "c1", "name": "AI"}],
-    "snippets": [{"id": "s1", "content": "x", "category": "c1"}],
-}
-legacy_path = os.path.join(tmp, "legacy.json")
-with open(legacy_path, "w", encoding="utf-8") as f:
-    import json as _json
-    _json.dump(legacy, f)
-M.DATA_FILE = legacy_path
-M2 = M.Api()
-check("migration adds window_x", "window_x" in M2.data["settings"])
-check("migration adds active_cat default", M2.data["settings"].get("active_cat") == "all")
-check("migration keeps snippets", M2.data["snippets"][0]["content"] == "x")
-check("migration keeps hotkey", M2.data["settings"]["hotkey"] == "ctrl+`")
-
-# ---------------------------------------------------------------------------
-# 汇总
-# ---------------------------------------------------------------------------
-def _report():
-    print("=" * 64)
-    print("FloatSnip v2 逻辑层验证")
-    print("=" * 64)
-    print("\n".join(EVID))
-    print("-" * 64)
-    print("RESULT: %d passed, %d failed" % (PASS, FAIL))
+def test_migration_adds_missing_fields(tmp_path, monkeypatch):
+    legacy = {
+        "settings": {"auto_paste": False, "hotkey": "ctrl+`"},
+        "categories": [{"id": "all", "name": "所有", "fixed": True},
+                       {"id": "c1", "name": "AI"}],
+        "snippets": [{"id": "s1", "content": "x", "category": "c1"}],
+    }
+    p = tmp_path / "legacy.json"
+    p.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(M, "DATA_FILE", str(p))
+    data = M.load_data()
+    assert "window_x" in data["settings"]
+    assert data["settings"].get("active_cat") == "all"
+    assert data["snippets"][0]["content"] == "x"
+    assert data["settings"]["hotkey"] == "ctrl+`"
 
 
-def test_logic_all():
-    """pytest 门禁：所有逻辑层校验必须全部通过（含导出敏感过滤断言）。"""
-    _report()
-    assert FAIL == 0, "逻辑层校验存在失败项:\n" + "\n".join(EVID)
+def test_migration_resets_bare_key_hotkey(tmp_path, monkeypatch):
+    """事故回归：老版本可以把裸键写进 data.json，升级后必须回退默认热键。
+
+    否则用户升级完一开机，每敲一次那个键面板就弹一次。
+    """
+    legacy = {
+        "settings": {"auto_paste": False, "hotkey": "k"},
+        "categories": [{"id": "all", "name": "所有", "fixed": True}],
+        "snippets": [],
+    }
+    p = tmp_path / "legacy_bare.json"
+    p.write_text(json.dumps(legacy, ensure_ascii=False), encoding="utf-8")
+    monkeypatch.setattr(M, "DATA_FILE", str(p))
+    data = M.load_data()
+    assert data["settings"]["hotkey"] == M.DEFAULT_HOTKEY
+
+
+def test_load_data_falls_back_to_defaults_on_corrupt_file(tmp_path, monkeypatch):
+    p = tmp_path / "broken.json"
+    p.write_text("{ this is not json", encoding="utf-8")
+    monkeypatch.setattr(M, "DATA_FILE", str(p))
+    data = M.load_data()
+    assert data["settings"]["hotkey"] == M.DEFAULT_HOTKEY
+    assert data["categories"][0]["id"] == "all"
 
 
 if __name__ == "__main__":
-    _report()
-    sys.exit(1 if FAIL else 0)
+    raise SystemExit(pytest.main([__file__, "-q"]))

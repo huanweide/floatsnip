@@ -24,8 +24,70 @@ test_ui.py
 test_ui_scenario.py
 .loop-state.json
 
-# 废弃的 WebView2 版 UI（已改用 PySide6 原生控件）
+# 废弃的 WebView2 版 UI（已改用 tkinter + Win32 RGN 裁剪实现真·无白边）
 gui/
+
+# === 凭据类：永久禁止入 Git ===
+# 环境变量（真实密钥只准在环境变量，不准进仓库）
+.env
+.env.*
+!.env.example
+!.env.template
+
+# 密钥 / 证书 / 私钥
+*.pem
+*.key
+*.p12
+*.pfx
+*.crt
+*.cer
+*.der
+*.priv
+id_rsa
+id_ecdsa
+id_ed25519
+id_dsa
+.ssh/
+*.pub
+
+# 云平台凭据目录
+.aws/
+.azure/
+.gcp/
+.gcloud/
+.kube/
+.k8s/
+kubeconfig*
+
+# 通用凭据文件
+credentials.json
+credentials.yaml
+credentials.yml
+service-account*.json
+*service-account*.json
+auth.json
+tokens.json
+token.json
+secrets.json
+secret*.json
+*.secret
+*.token
+*.session
+cookies.json
+*.cookies
+
+# 包管理器 / 认证凭据
+.npmrc
+.pypirc
+.pip.conf
+pip.conf
+.netrc
+.git-credentials
+.github-token
+.gho
+
+# 本地脚本临时备份
+_main.py.bak
 
 # 下载缓存
 release_dl*/
