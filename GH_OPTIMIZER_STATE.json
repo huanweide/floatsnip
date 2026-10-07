@@ -1,0 +1,28 @@
+{
+  "repo": "floatsnip",
+  "lastOptimized": "2026-10-08",
+  "round": 1,
+  "status": "optimized",
+  "verdict": "keep",
+  "direction": "单点深度特化：唤起链路零失效（快捷键零误触 + 软上限真实生效）",
+  "improvements": [
+    "P0：禁止无修饰键的全局热键（normalize_hotkey / UI 录制 / set_hotkey 文案 / 老数据迁移），修复『把 k 设成热键后每次打字都弹面板』",
+    "P1：README 承诺的『软上限 10000 字』此前代码中不存在，现由 MAX_SNIPPET_LEN 真正实现",
+    "P1：test_logic.py 由『模块顶层执行 ~60 条断言、只收集到 1 个 test』重写为 71 个细粒度 pytest 用例（无 import 期副作用）",
+    "P2：README 去重双许可证、删除别的项目模板残留的『CI 门禁用法』段、补充『开发 · 测试』小节",
+    "P2：.gitignore 补齐凭据类条目并修正过期注释"
+  ],
+  "tests": {
+    "before": "1 passed（假粒度）",
+    "after": "71 passed",
+    "mutation": "6/6 被抓"
+  },
+  "decisionLog": "OPTIMIZER_LOG.md",
+  "pr": "TBD",
+  "merged": false,
+  "nextFocus": [
+    "面板渲染长文本的性能（软上限之上是否需要分页/截断显示）",
+    "敏感片段只留内存不落盘的机制是否需要在 UI 上明确告知",
+    "开机自启注册表写入失败的可观测性"
+  ]
+}
