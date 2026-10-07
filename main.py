@@ -31,6 +31,11 @@ GMEM_MOVEABLE = 0x0002
 CF_UNICODETEXT = 13
 DEFAULT_HOTKEY = "ctrl+`"
 
+# 单条常用语的字符上限（README 承诺的「软上限 10000 字」）。
+# 为什么要有上限：面板用单个 Text/Label 直接渲染内容，超长文本（例如整篇 prompt）
+# 会让展开面板明显掉帧；超限在这里明确拒绝并给出提示，而不是静默截断或静默卡死。
+MAX_SNIPPET_LEN = 10000
+
 DEFAULT_DATA = {
     "settings": {"auto_paste": False, "hotkey": DEFAULT_HOTKEY, "window_x": None, "window_y": None,
                   "active_cat": "all", "autostart": False},
@@ -175,6 +180,10 @@ def load_data():
             for k, v in DEFAULT_DATA["settings"].items():
                 if k not in data["settings"]:
                     data["settings"][k] = v
+            # 老数据里可能存着「裸键」热键（旧版本允许只设一个键），升级后这类热键
+            # 已判定为非法：直接回退默认值，否则用户一开机就被面板疯狂弹窗。
+            if normalize_hotkey(data["settings"].get("hotkey")) is None:
+                data["settings"]["hotkey"] = DEFAULT_DATA["settings"]["hotkey"]
             existing_ids = {c.get("id") for c in data["categories"]}
             migrated = False
             for c in DEFAULT_DATA["categories"]:
@@ -410,11 +419,28 @@ def normalize_hotkey(expr):
     single_char = set("abcdefghijklmnopqrstuvwxyz0123456789`~!@#$%^&*()-_=+[]{}\\|;:'\",.<>/?")
     key_spec = key if (len(key) == 1 and key in single_char) else "<%s>" % key
     spec = "+".join(mods + [key_spec]) if mods else key_spec
+    if not mods:
+        # 无修饰键的「裸键」热键是灾难：把 k 设成热键后，用户在任何窗口里每敲一次
+        # k 面板都会弹出，等于这台电脑没法正常打字。全局热键必须带修饰键。
+        return None
     # 自校验：用 Win32 vk 解析确认主键合法（不再依赖 pynput，去掉全局钩子依赖）
     _mods, vk = _spec_to_mod_vk(spec)
     if vk is None:
         return None
     return spec
+
+
+def hotkey_has_modifier(expr):
+    """只看用户输入的串里有没有修饰键，与主键是否合法无关。
+
+    用于给出精确的错误提示：区分「格式不合法」和「少了 Ctrl/Alt/Shift/Win」。
+    """
+    if not expr or not isinstance(expr, str):
+        return False
+    for p in expr.split("+"):
+        if _canon_mod(p):
+            return True
+    return False
 
 
 def format_hotkey_display(expr):
@@ -612,6 +638,9 @@ class Api:
         content = (content or "").strip()
         if not content:
             return {"ok": False, "msg": "内容不能为空"}
+        if len(content) > MAX_SNIPPET_LEN:
+            return {"ok": False, "msg": "内容过长（单条上限 %d 字，当前 %d 字）"
+                                        % (MAX_SNIPPET_LEN, len(content))}
         if category == "all":
             category = "c1"
         if sid:
@@ -755,6 +784,10 @@ class Api:
     def set_hotkey(self, expr):
         spec = normalize_hotkey(expr)
         if spec is None:
+            if not hotkey_has_modifier(expr):
+                return {"ok": False,
+                        "msg": "快捷键必须包含 Ctrl / Alt / Shift / Win 其中之一"
+                               "（只设单个按键会导致打字时反复弹出面板）"}
             return {"ok": False, "msg": "快捷键格式不合法"}
         self.data["settings"]["hotkey"] = spec
         save_data(self.data)
@@ -2364,7 +2397,8 @@ class SettingsDialog(tk.Toplevel):
     def _stop_record(self):
         if self.recording:
             self.recording = False
-            if self.hotkey_var.get() == "按下组合键…":
+            cur = self.hotkey_var.get()
+            if cur in ("按下组合键…", "请按住 Ctrl/Alt/Shift/Win 再按主键"):
                 self.hotkey_var.set(format_hotkey_display(self.api.data["settings"].get("hotkey", DEFAULT_HOTKEY)))
 
     def _on_key(self, e):
@@ -2386,6 +2420,10 @@ class SettingsDialog(tk.Toplevel):
             return "break"
         if key in ("grave", "asciitilde"):
             key = "`"
+        if not mods:
+            # 裸键不能作为全局热键（否则打字时会一直弹面板），这里直接拒绝并继续录制
+            self.hotkey_var.set("请按住 Ctrl/Alt/Shift/Win 再按主键")
+            return "break"
         parts = mods + [key]
         self.hotkey_var.set(format_hotkey_display("+".join(parts)))
         self.recording = False
