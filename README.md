@@ -11,6 +11,13 @@
 
 复制粘贴是日常最高频、也最打断心流的操作之一——写代码要反复找 prompt、发话术要来回切换窗口、账号命令模板天天复制。FloatSnip 想做的很简单：让常用文字常驻桌面，零延迟拖到顺手位置，点开就看到，点一下就复制，完了。
 
+> **📦 便携性速览**
+>
+> - Windows 10/11 桌面工具，下载 `FloatSnip.exe` **免安装**直接跑；或 `python main.py` 从源码跑（Python 3.x）。
+> - UI 用标准库 `tkinter`，**零额外 GUI 框架依赖**；数据纯本地 JSON，不上传任何服务器。
+> - 也可 PyInstaller 打包成单文件 exe 分发。
+
+
 ## 功能特性
 
 | 功能 | 说明 |
@@ -133,3 +140,12 @@ CI（`.github/workflows/ci.yml`）在 `windows-latest` 上跑同一套命令。
 ## 许可证
 
 MIT —— 完全免费，欢迎 Star 与 PR。详见 [LICENSE](LICENSE)。
+---
+
+## 🧰 更多开源工具（by ReTri · 樊斯瑞）
+
+- 🎬 字幕 / 视频：[bili-subtitle-universal](https://github.com/huanweide/bili-subtitle-universal) · [live-subtitle](https://github.com/huanweide/live-subtitle) · [zhihuishu-helper](https://github.com/huanweide/zhihuishu-helper) · [video-brief](https://github.com/huanweide/video-brief)
+- 🩺 代码健康全家桶（18 轴零依赖 CLI）：[family-showcase](https://github.com/huanweide/family-showcase)
+- 🔧 命令行利器：[idiot-index](https://github.com/huanweide/idiot-index) · [recall-cli](https://github.com/huanweide/recall-cli) · [forge-safeguard](https://github.com/huanweide/forge-safeguard-20260812)
+- 🖥️ 桌面 / 资讯：[floatsnip](https://github.com/huanweide/floatsnip) · [tech-news-hub](https://github.com/huanweide/tech-news-hub)
+- 📦 全部仓库：<https://github.com/huanweide?tab=repositories>
