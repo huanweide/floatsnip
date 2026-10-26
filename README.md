@@ -1,3 +1,5 @@
+**⚡ A floating-ball quick-paste tool: one click copies your common snippets. Free, open-source, single-file, no install.**
+
 <!-- badges -->
 [![License](https://img.shields.io/github/license/huanweide/floatsnip)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%2010%2F11-blue)](https://www.microsoft.com/windows)
