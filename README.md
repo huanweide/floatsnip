@@ -2,6 +2,8 @@
   <img src="assets/banner.svg" alt="FloatSnip">
 </p>
 
+<p align="center"><sub>English: 暂未提供（No English docs yet）</sub></p>
+
 <p align="center">
   <a href="#功能特性">特性</a> · <a href="#快速开始">快速开始</a> · <a href="#工作原理">架构</a> · <a href="#开发--测试">测试</a>
 </p>
@@ -129,7 +131,7 @@ floatsnip/
 
 ## 作者
 
-由 **ReTr · huanweide** 维护 · [GitHub 主页](https://github.com/huanweide)
+由 **huanweide** 维护 · [GitHub 主页](https://github.com/huanweide)
 
 ## 开发 · 测试
 
@@ -149,7 +151,7 @@ CI（`.github/workflows/ci.yml`）在 `windows-latest` 上跑同一套命令。
 MIT —— 完全免费，欢迎 Star 与 PR。详见 [LICENSE](LICENSE)。
 ---
 
-## 🧰 更多开源工具（by ReTri · huanweide）
+## 🧰 更多开源工具（by huanweide）
 
 - 🎬 字幕 / 视频：[bili-subtitle-universal](https://github.com/huanweide/bili-subtitle-universal) · [live-subtitle](https://github.com/huanweide/live-subtitle) · [zhihuishu-helper](https://github.com/huanweide/zhihuishu-helper) · [video-brief](https://github.com/huanweide/video-brief)
 - 🩺 代码健康全家桶（18 轴零依赖 CLI）：[family-showcase](https://github.com/huanweide/family-showcase)
