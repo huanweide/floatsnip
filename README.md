@@ -2,7 +2,7 @@
   <img src="assets/banner.svg" alt="FloatSnip">
 </p>
 
-<p align="center"><sub>English: 暂未提供（No English docs yet）</sub></p>
+<p align="center"><sub>**English** · [README_EN.md](./README_EN.md)</sub></p>
 
 <p align="center">
   <a href="#功能特性">特性</a> · <a href="#快速开始">快速开始</a> · <a href="#工作原理">架构</a> · <a href="#开发--测试">测试</a>
